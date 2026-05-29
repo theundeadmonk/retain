@@ -13,14 +13,20 @@ class MockProvider(LLMProvider):
     """Deterministic mock that records every call.
 
     Args:
-        response: The string to return on every call.
+        response: The string(s) to return. If a single string, every
+            call returns it. If a list, the *n*-th call returns the
+            *n*-th string, repeating the last element when exhausted.
 
     The :attr:`calls` list records each invocation so tests can
     inspect what was sent to the provider.
     """
 
-    def __init__(self, response: str = "") -> None:
-        self.response = response
+    def __init__(self, response: str | list[str] = "") -> None:
+        if isinstance(response, str):
+            self._responses = [response]
+        else:
+            self._responses = list(response)
+        self._call_count = 0
         self.calls: list[dict[str, Any]] = []
 
     async def complete(
@@ -39,4 +45,7 @@ class MockProvider(LLMProvider):
             "temperature": temperature,
             "kwargs": kwargs,
         })
-        return self.response
+        idx = min(self._call_count, len(self._responses) - 1)
+        result = self._responses[idx]
+        self._call_count += 1
+        return result
