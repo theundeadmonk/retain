@@ -192,3 +192,20 @@ class TestProcessFailure:
         ))
         s = await _poll(ms, event_id)
         assert s["status"] == "failed"
+
+    async def test_extraction_timeout(self, temp_db: str) -> None:
+        class SlowProvider(MockProvider):
+            async def complete(self, messages, **kwargs):
+                await asyncio.sleep(5.0)
+                return await super().complete(messages, **kwargs)
+
+        provider = SlowProvider(response=[_EXTRACT_FACTS, _PROFILE])
+        ms = Memory(storage=f"sqlite+aiosqlite:///{temp_db}", llm=provider)
+        event_id = await ms.process(
+            ProcessRequest(transcript=_TRANSCRIPT, entities=[_ENTITY]),
+            extraction_timeout=0.1,
+        )
+        s = await _poll(ms, event_id)
+        assert s["status"] == "failed"
+        assert "timed out" in s["result"]["error"]
+        assert s["payload"]["extraction_timeout"] == 0.1
