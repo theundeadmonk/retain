@@ -3,21 +3,27 @@
 from retain.errors import (
     RetainConfigError,
     RetainError,
+    RetainLLMError,
     RetainNotImplementedError,
     RetainStorageError,
 )
+from retain.llm import LLMProvider, MockProvider, OpenAIProvider
 from retain.memory import Memory
 from retain.types import Context, MemoryRecord, ProcessRequest, TaskRecord
 
 __all__ = [
     "Memory",
     "Context",
+    "LLMProvider",
     "MemoryRecord",
-    "TaskRecord",
+    "MockProvider",
+    "OpenAIProvider",
     "ProcessRequest",
-    "RetainError",
-    "RetainStorageError",
     "RetainConfigError",
+    "RetainError",
+    "RetainLLMError",
     "RetainNotImplementedError",
+    "RetainStorageError",
+    "TaskRecord",
 ]
 

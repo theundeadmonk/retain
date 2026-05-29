@@ -1,10 +1,11 @@
 """Exception hierarchy for retain."""
 
 __all__ = [
-    "RetainError",
-    "RetainStorageError",
     "RetainConfigError",
+    "RetainError",
+    "RetainLLMError",
     "RetainNotImplementedError",
+    "RetainStorageError",
 ]
 
 
@@ -18,6 +19,10 @@ class RetainStorageError(RetainError):
 
 class RetainConfigError(RetainError):
     """Invalid configuration."""
+
+
+class RetainLLMError(RetainError):
+    """LLM API call failed."""
 
 
 class RetainNotImplementedError(RetainError, NotImplementedError):

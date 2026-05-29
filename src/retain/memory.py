@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as _pg_insert
 from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from retain.llm.base import LLMProvider
 from retain.storage import create_engine as _create_engine
 from retain.storage import init_db
 from retain.storage.models import Entity
@@ -75,11 +76,11 @@ class Memory:
         self,
         storage: str = "sqlite+aiosqlite:///retain.db",
         *,
-        llm: str | None = None,
+        llm: LLMProvider | None = None,
         embedder: str | None = None,
     ) -> None:
         self._engine: AsyncEngine = _create_engine(storage)
-        self._llm_config = llm
+        self._llm = llm
         self._embedder_config = embedder
         self._initialized = False
 
