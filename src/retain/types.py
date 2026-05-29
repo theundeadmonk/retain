@@ -26,9 +26,14 @@ class EntityRef(BaseModel):
 
 
 class MemoryRecord(BaseModel):
-    """A typed fact about an entity."""
+    """A typed fact about an entity.
 
-    id: str
+    ``id`` is ``None`` for candidate facts returned by
+    :func:`~retain.extraction.extract` and is assigned when the fact
+    is stored via :meth:`~retain.memory.Memory.remember`.
+    """
+
+    id: str | None = None
     entity_type: str
     entity_id: str
     memory_type: str
