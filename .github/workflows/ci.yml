@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: lint
+            cmd: uv run ruff check src/ tests/
+          - name: typecheck
+            cmd: uv run mypy src/retain/ --ignore-missing-imports
+          - name: unit-tests
+            cmd: uv run pytest tests/ -m unit -v
+          - name: integration-tests
+            cmd: uv run pytest tests/ -m integration -v
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - run: uv sync --extra dev
+      - run: ${{ matrix.cmd }}

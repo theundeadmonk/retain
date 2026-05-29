@@ -1,0 +1,69 @@
+[project]
+name = "retain"
+version = "0.1.0"
+description = "The memory layer built for real-time agents"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Aditya Mattos" },
+]
+keywords = [
+    "memory",
+    "ai-agents",
+    "llm",
+    "voice-agents",
+    "long-term-memory",
+    "customer-support",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.20",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.30", "pgvector>=0.3"]
+llm = ["httpx>=0.28"]
+embeddings = ["sentence-transformers>=3.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/retain"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "unit: fast tests that don't need external services",
+    "integration: multi-step end-to-end scenarios",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+]
