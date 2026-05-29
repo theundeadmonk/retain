@@ -1,5 +1,6 @@
 """Core Memory class — hot-path and cold-path operations."""
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -10,12 +11,16 @@ from sqlalchemy.dialects.postgresql import insert as _pg_insert
 from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from retain.errors import RetainConfigError
+from retain.extraction import deduplicate, extract, synthesize_profile
 from retain.llm.base import LLMProvider
 from retain.storage import create_engine as _create_engine
 from retain.storage import init_db
 from retain.storage.models import Entity
+from retain.storage.models import Event as EventModel
 from retain.storage.models import Memory as MemoryModel
 from retain.storage.models import Task as TaskModel
+from retain.storage.models import Transcript as TranscriptModel
 from retain.types import Context, MemoryRecord, ProcessRequest, TaskRecord
 
 __all__ = [
@@ -351,15 +356,183 @@ class Memory:
 
         return tasks
 
-    # ── cold path (stubs) ─────────────────────────────────────
+    # ── cold path ──────────────────────────────────────────────
 
     async def process(self, request: ProcessRequest) -> str:
-        """Submit a transcript for async extraction. Returns event_id."""
-        raise NotImplementedError("process is not yet implemented")
+        """Submit a transcript for async extraction. Returns event_id.
+
+        The extraction, deduplication, and profile synthesis run in a
+        background :class:`asyncio.Task`. Poll :meth:`event_status` to
+        track completion.
+        """
+        if self._llm is None:
+            raise RetainConfigError(
+                "Memory.process() requires an LLM provider configured at init."
+            )
+        await self._ensure_init()
+
+        event_id = _new_id()
+        transcript_id = _new_id()
+        now = _utcnow()
+
+        async with self._engine.begin() as conn:
+            await conn.execute(
+                insert(TranscriptModel).values(
+                    id=transcript_id,
+                    entities={"entities": [
+                        {"entity_type": e.entity_type, "entity_id": e.entity_id}
+                        for e in request.entities
+                    ]},
+                    content={"messages": request.transcript},
+                    extra=request.metadata,
+                    status="processing",
+                    created_at=now,
+                )
+            )
+            await conn.execute(
+                insert(EventModel).values(
+                    id=event_id,
+                    event_type="extraction",
+                    status="pending",
+                    payload={
+                        "transcript_id": transcript_id,
+                        "entities": [
+                            {"entity_type": e.entity_type, "entity_id": e.entity_id}
+                            for e in request.entities
+                        ],
+                    },
+                    created_at=now,
+                )
+            )
+
+        _ = asyncio.create_task(self._process_background(event_id, request))
+        return event_id
+
+    async def _process_background(
+        self, event_id: str, request: ProcessRequest
+    ) -> None:
+        """Async pipeline: extract → dedup → store → synthesize.
+
+        Runs as a fire-and-forget :class:`asyncio.Task`. On failure
+        the event is marked ``"failed"`` with error details.
+        """
+        assert self._llm is not None, "process() must verify LLM before spawning"
+        provider: LLMProvider = self._llm
+        try:
+            await self._ensure_init()
+            now = _utcnow()
+
+            async with self._engine.begin() as conn:
+                await conn.execute(
+                    update(EventModel)
+                    .where(EventModel.id == event_id)
+                    .values(status="processing", updated_at=now)
+                )
+
+            facts = await extract(
+                provider,
+                request.transcript,
+                request.entities,
+                instructions=request.instructions,
+            )
+
+            entity_facts: dict[tuple[str, str], list[MemoryRecord]] = {}
+            for f in facts:
+                key = (f.entity_type, f.entity_id)
+                entity_facts.setdefault(key, []).append(f)
+
+            for (entity_type, entity_id), new_facts in entity_facts.items():
+                async with self._engine.begin() as conn:
+                    result = await conn.execute(
+                        select(MemoryModel).where(
+                            MemoryModel.entity_type == entity_type,
+                            MemoryModel.entity_id == entity_id,
+                        )
+                    )
+                    existing = [_row_to_memory(r) for r in result.all()]
+
+                novel = deduplicate(new_facts, existing)
+
+                for fact in novel:
+                    await self.remember(
+                        fact.entity_type,
+                        fact.entity_id,
+                        fact.memory_type,
+                        fact.value,
+                        source=fact.source,
+                    )
+
+                all_facts = existing + novel
+                profile = await synthesize_profile(
+                    provider, entity_type, entity_id, all_facts,
+                )
+
+                async with self._engine.begin() as conn:
+                    await conn.execute(
+                        update(Entity)
+                        .where(
+                            Entity.entity_type == entity_type,
+                            Entity.entity_id == entity_id,
+                        )
+                        .values(profile_blob=profile, updated_at=_utcnow())
+                    )
+
+            async with self._engine.begin() as conn:
+                await conn.execute(
+                    update(EventModel)
+                    .where(EventModel.id == event_id)
+                    .values(
+                        status="completed",
+                        result={
+                            "facts_extracted": len(facts),
+                            "entities_processed": len(entity_facts),
+                        },
+                        completed_at=_utcnow(),
+                        updated_at=_utcnow(),
+                    )
+                )
+
+        except Exception as exc:
+            logger.exception("Background extraction %s failed", event_id)
+            try:
+                async with self._engine.begin() as conn:
+                    await conn.execute(
+                        update(EventModel)
+                        .where(EventModel.id == event_id)
+                        .values(
+                            status="failed",
+                            result={"error": str(exc)},
+                            completed_at=_utcnow(),
+                            updated_at=_utcnow(),
+                        )
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to mark event %s as failed", event_id
+                )
 
     async def event_status(self, event_id: str) -> dict[str, Any]:
-        """Poll the status of an async event."""
-        raise NotImplementedError("event_status is not yet implemented")
+        """Poll the status of an async extraction event."""
+        await self._ensure_init()
+
+        async with self._engine.begin() as conn:
+            result = await conn.execute(
+                select(EventModel).where(EventModel.id == event_id)
+            )
+            row = result.fetchone()
+            if row is None:
+                return {"status": "not_found"}
+
+        return {
+            "event_id": row.id,
+            "event_type": row.event_type,
+            "status": row.status,
+            "payload": row.payload or {},
+            "result": row.result or {},
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "completed_at": row.completed_at,
+        }
 
     async def search(
         self,
