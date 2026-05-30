@@ -1,23 +1,17 @@
-import os
-import tempfile
-
 import pytest
+from sqlalchemy.ext.asyncio import create_async_engine
 
-from retain import Memory
-
-
-@pytest.fixture
-async def memory():
-    m = Memory(storage="sqlite+aiosqlite:///:memory:")
-    yield m
+from retain.models import Base
+from retain.settings import settings
 
 
 @pytest.fixture
-def temp_db():
-    fd, path = tempfile.mkstemp(suffix=".db", prefix="retain-test-")
-    os.close(fd)
-    yield path
-    try:
-        os.unlink(path)
-    except FileNotFoundError:
-        pass
+async def engine():
+    engine = create_async_engine(settings.test_database_url, echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
