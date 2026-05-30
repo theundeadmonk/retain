@@ -1,7 +1,7 @@
 [project]
 name = "retain"
 version = "0.1.0"
-description = "The memory layer built for real-time agents"
+description = "The memory layer built for real-time agents — FastAPI server"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
@@ -27,19 +27,19 @@ classifiers = [
 
 dependencies = [
     "sqlalchemy[asyncio]>=2.0",
-    "aiosqlite>=0.20",
+    "asyncpg>=0.30",
+    "pgvector>=0.3",
     "pydantic>=2.0",
     "httpx>=0.28",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.0",
+    "alembic>=1.14",
+    "psycopg2-binary>=2.9",
 ]
 
 [project.optional-dependencies]
-postgres = ["asyncpg>=0.30", "pgvector>=0.3"]
 embeddings = ["sentence-transformers>=3.0"]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
-    "ruff>=0.8",
-]
 
 [build-system]
 requires = ["hatchling"]
@@ -66,4 +66,7 @@ markers = [
 [dependency-groups]
 dev = [
     "mypy>=2.1.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
 ]

@@ -9,6 +9,9 @@ from pydantic import BaseModel
 
 __all__ = [
     "Context",
+    "ContextRequest",
+    "CreateMemoryRequest",
+    "CreateTaskRequest",
     "EntityRef",
     "EventRecord",
     "MemoryRecord",
@@ -30,7 +33,7 @@ class MemoryRecord(BaseModel):
 
     ``id`` is ``None`` for candidate facts returned by
     :func:`~retain.extraction.extract` and is assigned when the fact
-    is stored via :meth:`~retain.memory.Memory.remember`.
+    is stored via :func:`~retain.hot_path.remember`.
     """
 
     id: str | None = None
@@ -99,4 +102,35 @@ class SearchResult(BaseModel):
 
     chunk_text: str
     score: float
+    metadata: dict[str, Any] = {}
+
+
+# ── API request models ─────────────────────────────────────────
+
+
+class ContextRequest(BaseModel):
+    """Request body for POST /v1/context."""
+
+    entity_type: str
+    entity_id: str
+
+
+class CreateMemoryRequest(BaseModel):
+    """Request body for POST /v1/memories."""
+
+    entity_type: str
+    entity_id: str
+    memory_type: str
+    value: dict[str, Any]
+    metadata: dict[str, Any] = {}
+    source: str = "agent"
+
+
+class CreateTaskRequest(BaseModel):
+    """Request body for POST /v1/tasks."""
+
+    entity_type: str
+    entity_id: str
+    task_type: str
+    description: str
     metadata: dict[str, Any] = {}

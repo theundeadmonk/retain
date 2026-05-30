@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: retain
+      POSTGRES_PASSWORD: retain
+      POSTGRES_DB: retain
+    ports:
+      - "5432:5432"
+    command: >
+      postgres -c "max_connections=50"
+    volumes:
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U retain"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  server:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      RETAIN_DATABASE_URL: postgresql+asyncpg://retain:retain@postgres:5432/retain
+      RETAIN_LLM_API_KEY: ${RETAIN_LLM_API_KEY:-}
+      RETAIN_LLM_BASE_URL: ${RETAIN_LLM_BASE_URL:-}
+      RETAIN_LLM_MODEL: ${RETAIN_LLM_MODEL:-gpt-4o-mini}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
