@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from retain.embeddings.local import FastEmbedProvider
+from retain.embeddings.local import FastEmbedProvider, SparseEmbedProvider
 from retain.llm.openai import OpenAIProvider
 from retain.routes import router as v1_router
 from retain.settings import settings
@@ -30,8 +30,14 @@ async def lifespan(app: FastAPI):
         batch_size=settings.embedding_batch_size,
     )
 
-    # preload ONNX model at startup — no cold-start on first search
+    app.state.sparse_provider = SparseEmbedProvider(
+        model_name=settings.embedding_sparse_model,
+        batch_size=settings.embedding_batch_size,
+    )
+
+    # preload ONNX models at startup — no cold-start on first query
     _ = app.state.embedding_provider.dim
+    _ = app.state.sparse_provider.encode_query_sync("warmup")
 
     yield
     await engine.dispose()

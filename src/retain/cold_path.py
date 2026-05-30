@@ -11,8 +11,9 @@ import logging
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from retain.chunking import chunk_transcript
+from retain.chunking import decompose_transcript
 from retain.embeddings.base import EmbeddingProvider
+from retain.embeddings.local import SparseEmbedProvider
 from retain.extraction import deduplicate, extract, synthesize_profile
 from retain.hot_path import (
     _new_id,
@@ -42,6 +43,7 @@ async def process(
     *,
     extraction_timeout: float = 30.0,
     embedding_provider: EmbeddingProvider | None = None,
+    sparse_provider: SparseEmbedProvider | None = None,
 ) -> str:
     """Submit a transcript for async extraction. Returns event_id."""
     event_id = _new_id()
@@ -81,7 +83,8 @@ async def process(
 
     _ = asyncio.create_task(
         _process_background(
-            engine, llm, event_id, request, extraction_timeout, embedding_provider,
+            engine, llm, event_id, request, extraction_timeout,
+            embedding_provider, sparse_provider,
         )
     )
     return event_id
@@ -94,6 +97,7 @@ async def _process_background(
     request: ProcessRequest,
     extraction_timeout: float,
     embedding_provider: EmbeddingProvider | None = None,
+    sparse_provider: SparseEmbedProvider | None = None,
 ) -> None:
     """Async pipeline: extract → dedup → store → synthesize → embed."""
     transcript_id = await _get_transcript_id_from_event(engine, event_id)
@@ -114,7 +118,7 @@ async def _process_background(
     if embedding_provider is not None and transcript_id is not None:
         try:
             await _embed_chunks(
-                engine, embedding_provider, transcript_id, request
+                engine, llm, embedding_provider, transcript_id, request, sparse_provider,
             )
         except Exception:
             logger.exception(
@@ -261,44 +265,65 @@ async def _get_transcript_id_from_event(
 
 async def _embed_chunks(
     engine: AsyncEngine,
+    llm: LLMProvider,
     provider: EmbeddingProvider,
     transcript_id: str,
     request: ProcessRequest,
+    sparse_provider: SparseEmbedProvider | None = None,
 ) -> None:
-    """Chunk the transcript, embed, and store in transcript_chunks."""
-    chunks = chunk_transcript(request.transcript)
-    if not chunks:
+    """Decompose transcript into propositions, embed, and store chunks."""
+    propositions = await decompose_transcript(
+        llm, request.transcript, entities=request.entities,
+    )
+    if not propositions:
         return
+
+    entity_type = request.entities[0].entity_type if request.entities else "unknown"
+    entity_id = request.entities[0].entity_id if request.entities else "unknown"
 
     texts: list[str] = []
     rows: list[dict[str, object]] = []
-    for i, chunk_text in enumerate(chunks):
-        entity_type = request.entities[0].entity_type if request.entities else "unknown"
-        entity_id = request.entities[0].entity_id if request.entities else "unknown"
-        texts.append(chunk_text)
+    for i, text in enumerate(propositions):
+        texts.append(text)
         rows.append({
             "id": _new_id(),
             "transcript_id": transcript_id,
             "entity_type": entity_type,
             "entity_id": entity_id,
             "chunk_index": i,
-            "chunk_text": chunk_text,
+            "chunk_text": text,
         })
 
     embeddings = await provider.encode_documents(texts)
+    sparse_embeddings: list[dict[str, object]] | None = None
+    if sparse_provider is not None:
+        sparse_embeddings = await sparse_provider.encode_documents(texts)
 
     async with engine.begin() as conn:
-        for row_data, embedding in zip(rows, embeddings):
-            await conn.execute(
-                insert(TranscriptChunk).values(
-                    id=row_data["id"],
-                    transcript_id=row_data["transcript_id"],
-                    entity_type=row_data["entity_type"],
-                    entity_id=row_data["entity_id"],
-                    chunk_index=row_data["chunk_index"],
-                    chunk_text=row_data["chunk_text"],
-                    embedding=embedding,
-                    created_at=_utcnow(),
-                    updated_at=_utcnow(),
-                )
-            )
+        for i, row_data in enumerate(rows):
+            values = {
+                "id": row_data["id"],
+                "transcript_id": row_data["transcript_id"],
+                "entity_type": row_data["entity_type"],
+                "entity_id": row_data["entity_id"],
+                "chunk_index": row_data["chunk_index"],
+                "chunk_text": row_data["chunk_text"],
+                "embedding": embeddings[i],
+                "created_at": _utcnow(),
+                "updated_at": _utcnow(),
+            }
+            if sparse_embeddings is not None:
+                values["sparse_embedding"] = _to_sparse_format(sparse_embeddings[i])
+            await conn.execute(insert(TranscriptChunk).values(**values))
+
+
+def _to_sparse_format(sparse: dict[str, object]) -> str:
+    indices: list[int] = sparse.get("indices", [])  # type: ignore[assignment]
+    values: list[float] = sparse.get("values", [])  # type: ignore[assignment]
+    if len(indices) != len(values):
+        raise ValueError(
+            f"SPLADE indices/values length mismatch: "
+            f"{len(indices)} vs {len(values)}"
+        )
+    pairs = ",".join(f"{i}:{v}" for i, v in zip(indices, values))
+    return "{" + pairs + "}/30522"

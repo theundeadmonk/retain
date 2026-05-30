@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     embedding_batch_model: str = "BAAI/bge-large-en-v1.5"
     embedding_device: str = "cpu"
     embedding_batch_size: int = 32
+    embedding_sparse_model: str = "prithivida/Splade_PP_en_v1"
 
     model_config = {"env_prefix": "RETAIN_"}
 
