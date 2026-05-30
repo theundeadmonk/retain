@@ -12,7 +12,10 @@ import numpy as np
 
 from retain.embeddings.base import EmbeddingProvider
 
-__all__ = ["FastEmbedProvider"]
+__all__ = [
+    "FastEmbedProvider",
+    "SparseEmbedProvider",
+]
 
 
 class FastEmbedProvider(EmbeddingProvider):
@@ -83,3 +86,65 @@ class FastEmbedProvider(EmbeddingProvider):
     def _encode_sync_impl(self, texts: list[str]) -> list[list[float]]:
         self._load()
         return self._encode_sync(texts)
+
+
+class SparseEmbedProvider:
+    """Lightweight SPLADE sparse embedding provider via fastembed.
+
+    Generates keyword-aware sparse vectors for hybrid search.
+    Complementary to dense embeddings (FastEmbedProvider).
+    """
+
+    def __init__(
+        self,
+        model_name: str = "prithivida/Splade_PP_en_v1",
+        *,
+        batch_size: int = 32,
+    ) -> None:
+        self._model_name = model_name
+        self._batch_size = batch_size
+        self._model: Any = None
+        self._executor = ThreadPoolExecutor(max_workers=1)
+
+    def _load(self) -> None:
+        if self._model is not None:
+            return
+        from fastembed import SparseTextEmbedding
+
+        self._model = SparseTextEmbedding(
+            model_name=self._model_name,
+            batch_size=self._batch_size,
+        )
+
+    async def encode_documents(
+        self, texts: list[str]
+    ) -> list[dict[str, object]]:
+        self._load()
+        return await asyncio.get_event_loop().run_in_executor(
+            self._executor,
+            self._encode_sync,
+            texts,
+        )
+
+    async def encode_query(
+        self, text: str
+    ) -> dict[str, object]:
+        result = await self.encode_documents([text])
+        return result[0]
+
+    def encode_query_sync(self, text: str) -> dict[str, object]:
+        self._load()
+        return self._encode_sync([text])[0]
+
+    def _encode_sync(
+        self, texts: list[str]
+    ) -> list[dict[str, object]]:
+        assert self._model is not None
+        embeddings = list(self._model.embed(texts))
+        return [
+            {
+                "indices": [int(i) + 1 for i in emb.indices.tolist()],
+                "values": [float(v) for v in emb.values.tolist()],
+            }
+            for emb in embeddings
+        ]

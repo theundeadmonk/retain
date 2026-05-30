@@ -4,6 +4,7 @@ from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from retain.embeddings.base import EmbeddingProvider
+from retain.embeddings.local import SparseEmbedProvider
 from retain.llm.base import LLMProvider
 
 
@@ -17,3 +18,7 @@ async def get_llm(request: Request) -> LLMProvider | None:
 
 async def get_embedding(request: Request) -> EmbeddingProvider | None:
     return getattr(request.app.state, "embedding_provider", None)
+
+
+async def get_sparse(request: Request) -> SparseEmbedProvider | None:
+    return getattr(request.app.state, "sparse_provider", None)

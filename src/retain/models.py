@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import halfvec, sparsevec
 from sqlalchemy import JSON, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -135,7 +135,12 @@ class TranscriptChunk(Base):
     entity_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[Any] = mapped_column(Vector(1024), nullable=True)
+    embedding: Mapped[Any] = mapped_column(
+        halfvec.HALFVEC(1024), nullable=True
+    )
+    sparse_embedding: Mapped[Any] = mapped_column(
+        sparsevec.SPARSEVEC(30522), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow

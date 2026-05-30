@@ -1,45 +1,92 @@
-"""Transcript chunking for embedding storage."""
+"""Proposition-based transcript decomposition — cold path.
+
+Uses LLM to decompose transcripts into atomic, self-contained propositions.
+Each proposition becomes a standalone chunk for embedding and retrieval.
+
+Technique: Proposition-Based Chunking (Chen et al., 2024)
+Why: Self-contained atomic facts eliminate chunk ambiguity, making
+     contextual retrieval (#4) and metadata prefixes (#1) unnecessary.
+"""
+
+from retain.llm.base import LLMProvider
+from retain.types import EntityRef
+
+__all__ = [
+    "DECOMPOSE_PROMPT",
+    "decompose_transcript",
+]
 
 
-__all__ = ["chunk_transcript"]
+DECOMPOSE_PROMPT = """\
+You are analyzing a conversation transcript. Decompose it into a list of \
+atomic, self-contained propositions.
+
+Each proposition must:
+- Be a single, complete fact (one piece of information)
+- Include all necessary context — who said what, about whom, regarding what
+- Be understandable without reading any other proposition or the original \
+transcript
+- Use specific details where available (names, amounts, dates, order numbers)
+
+Return ONLY a JSON array of strings — no markdown, no explanation.
+
+Example transcript:
+  agent: Hello, how can I help?
+  customer: I was double-charged $49.99 for order #4567 on May 1st
+  agent: I see the charge. I'll process a refund — it will take 3-5 business days.
+
+Example output:
+[
+  "Customer contacted support about a billing issue",
+  "Customer was double-charged $49.99 for order #4567",
+  "The double charge occurred on May 1st",
+  "Agent confirmed the double charge for order #4567",
+  "Agent will process a refund for the $49.99 double charge",
+  "The refund will take 3-5 business days to process"
+]
+
+Now decompose this transcript:
+
+{transcript}
+
+Propositions (JSON array):"""
 
 
-def chunk_transcript(
+async def decompose_transcript(
+    llm: LLMProvider,
     transcript: list[dict[str, str]],
     *,
-    max_chars: int = 2000,
-    overlap_sentences: int = 2,
+    entities: list[EntityRef] | None = None,
 ) -> list[str]:
-    """Split a transcript into overlapping sentence-aware chunks.
+    """Decompose a transcript into atomic propositions via LLM.
 
     Args:
+        llm: The LLM provider for decomposition.
         transcript: List of messages with ``role`` and ``content`` keys.
-        max_chars: Maximum characters per chunk (soft limit).
-        overlap_sentences: Number of sentences to overlap between chunks.
+        entities: Optional list of entities to contextualize propositions.
 
     Returns:
-        List of chunk strings ready for embedding.
+        List of self-contained proposition strings ready for embedding.
     """
-    text = _transcript_to_text(transcript)
-    sentences = _split_sentences(text)
+    transcript_text = _transcript_to_text(transcript)
+    if entities:
+        entity_context = "\n".join(
+            f"  - {e.entity_type}: {e.entity_id}" for e in entities
+        )
+        prompt_prefix = (
+            f"Relevant entities:\n{entity_context}\n\n"
+        )
+    else:
+        prompt_prefix = ""
+    prompt = prompt_prefix + DECOMPOSE_PROMPT.format(transcript=transcript_text)
 
-    chunks: list[str] = []
-    current: list[str] = []
-    current_len = 0
+    response = await llm.complete(
+        [{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_tokens=2048,
+    )
 
-    for sentence in sentences:
-        if current and current_len + len(sentence) > max_chars:
-            chunks.append(" ".join(current))
-            overlap = current[-overlap_sentences:] if overlap_sentences > 0 else []
-            current = list(overlap)
-            current_len = sum(len(s) for s in current)
-        current.append(sentence)
-        current_len += len(sentence)
-
-    if current:
-        chunks.append(" ".join(current))
-
-    return chunks
+    return _parse_propositions(response)
 
 
 def _transcript_to_text(messages: list[dict[str, str]]) -> str:
@@ -52,8 +99,20 @@ def _transcript_to_text(messages: list[dict[str, str]]) -> str:
     return "\n".join(parts)
 
 
-def _split_sentences(text: str) -> list[str]:
-    import re
+def _parse_propositions(response: str) -> list[str]:
+    """Parse the LLM JSON array response into a list of strings."""
+    import json
 
-    raw = re.split(r"(?<=[.!?])\s+", text)
-    return [s.strip() for s in raw if s.strip()]
+    response = response.strip()
+    if response.startswith("```"):
+        lines = response.split("\n")
+        response = "\n".join(lines[1:-1])
+
+    try:
+        parsed = json.loads(response)
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed if isinstance(item, str) and item.strip()]
+    except json.JSONDecodeError:
+        pass
+
+    return []
