@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from retain.embeddings.local import FastEmbedProvider
 from retain.llm.openai import OpenAIProvider
 from retain.routes import router as v1_router
 from retain.settings import settings
@@ -15,6 +16,7 @@ async def lifespan(app: FastAPI):
     engine = create_engine(settings.database_url)
 
     app.state.engine = engine
+
     app.state.llm = None
     if settings.llm_api_key and settings.llm_base_url:
         app.state.llm = OpenAIProvider(
@@ -22,6 +24,15 @@ async def lifespan(app: FastAPI):
             base_url=settings.llm_base_url,
             model=settings.llm_model,
         )
+
+    app.state.embedding_provider = FastEmbedProvider(
+        model_name=settings.embedding_query_model,
+        batch_size=settings.embedding_batch_size,
+    )
+
+    # preload ONNX model at startup — no cold-start on first search
+    _ = app.state.embedding_provider.dim
+
     yield
     await engine.dispose()
 

@@ -50,7 +50,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
-      - run: uv sync --group dev
+      - run: uv sync --group dev --group embeddings
       - run: ${{ matrix.cmd }}
     env:
       RETAIN_TEST_DATABASE_URL: postgresql+asyncpg://retain:retain@localhost:5432/retain_test

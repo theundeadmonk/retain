@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -14,6 +15,7 @@ __all__ = [
     "Memory",
     "Task",
     "Transcript",
+    "TranscriptChunk",
 ]
 
 
@@ -120,3 +122,21 @@ class Transcript(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TranscriptChunk(Base):
+    __tablename__ = "transcript_chunks"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    transcript_id: Mapped[str] = mapped_column(
+        String(32), nullable=False, index=True
+    )
+    entity_type: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    entity_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Any] = mapped_column(Vector(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )

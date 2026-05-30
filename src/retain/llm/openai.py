@@ -4,7 +4,6 @@ Works with any OpenAI-compatible API (OpenAI, DeepSeek, Grok, etc.).
 Uses httpx for async HTTP calls — no openai SDK dependency.
 """
 
-from __future__ import annotations
 
 from typing import Any
 
@@ -54,7 +53,7 @@ class OpenAIProvider(LLMProvider):
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(timeout))
 
-    async def __aenter__(self) -> OpenAIProvider:
+    async def __aenter__(self) -> "OpenAIProvider":
         return self
 
     async def __aexit__(
