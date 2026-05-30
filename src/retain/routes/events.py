@@ -5,7 +5,8 @@ from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from retain.cold_path import event_status, process
-from retain.deps import get_engine, get_llm
+from retain.deps import get_embedding, get_engine, get_llm
+from retain.embeddings.base import EmbeddingProvider
 from retain.llm.base import LLMProvider
 from retain.types import ProcessRequest
 
@@ -17,13 +18,16 @@ async def process_transcript(
     req: ProcessRequest,
     engine: AsyncEngine = Depends(get_engine),
     llm: LLMProvider | None = Depends(get_llm),
+    embedding_provider: EmbeddingProvider | None = Depends(get_embedding),
 ):
     if llm is None:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LLM provider not configured — extraction requires an LLM",
         )
-    event_id = await process(engine, llm, req)
+    event_id = await process(
+        engine, llm, req, embedding_provider=embedding_provider,
+    )
     return {"event_id": event_id}
 
 

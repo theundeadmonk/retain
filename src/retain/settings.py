@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_model: str = "gpt-4o-mini"
 
+    embedding_query_model: str = "BAAI/bge-large-en-v1.5"
+    embedding_batch_model: str = "BAAI/bge-large-en-v1.5"
+    embedding_device: str = "cpu"
+    embedding_batch_size: int = 32
+
     model_config = {"env_prefix": "RETAIN_"}
 
 

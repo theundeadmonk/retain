@@ -1,4 +1,7 @@
-"""Task routes — create, complete, list."""
+"""Hot-path routes — create, complete, list tasks.
+
+<50ms PostgreSQL reads/writes. No external dependencies.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncEngine

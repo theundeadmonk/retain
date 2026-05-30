@@ -1,4 +1,8 @@
-"""POST /v1/context — entity lookup."""
+"""Hot-path route — POST /v1/context.
+
+<50ms entity lookup returning profile_blob + recent memories + open tasks.
+Pure PostgreSQL read; no LLM, no embeddings.
+"""
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncEngine

@@ -4,12 +4,15 @@ Functions may take 2-5 seconds total (extract, synthesize profile).
 Use process() to submit work and event_status() to poll completion.
 """
 
+
 import asyncio
 import logging
 
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from retain.chunking import chunk_transcript
+from retain.embeddings.base import EmbeddingProvider
 from retain.extraction import deduplicate, extract, synthesize_profile
 from retain.hot_path import (
     _new_id,
@@ -18,7 +21,7 @@ from retain.hot_path import (
     remember,
 )
 from retain.llm.base import LLMProvider
-from retain.models import Entity
+from retain.models import Entity, TranscriptChunk
 from retain.models import Event as EventModel
 from retain.models import Memory as MemoryModel
 from retain.models import Transcript as TranscriptModel
@@ -27,7 +30,6 @@ from retain.types import MemoryRecord, ProcessRequest
 __all__ = [
     "event_status",
     "process",
-    "search",
 ]
 
 logger = logging.getLogger("retain")
@@ -39,6 +41,7 @@ async def process(
     request: ProcessRequest,
     *,
     extraction_timeout: float = 30.0,
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> str:
     """Submit a transcript for async extraction. Returns event_id."""
     event_id = _new_id()
@@ -77,7 +80,9 @@ async def process(
         )
 
     _ = asyncio.create_task(
-        _process_background(engine, llm, event_id, request, extraction_timeout)
+        _process_background(
+            engine, llm, event_id, request, extraction_timeout, embedding_provider,
+        )
     )
     return event_id
 
@@ -88,22 +93,34 @@ async def _process_background(
     event_id: str,
     request: ProcessRequest,
     extraction_timeout: float,
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> None:
-    """Async pipeline: extract → dedup → store → synthesize."""
+    """Async pipeline: extract → dedup → store → synthesize → embed."""
+    transcript_id = await _get_transcript_id_from_event(engine, event_id)
+
     try:
         await asyncio.wait_for(
             _run_extraction(engine, llm, event_id, request),
             timeout=extraction_timeout,
         )
     except TimeoutError:
-        await _fail_event(
-            engine,
-            event_id,
-            f"extraction timed out after {extraction_timeout}s",
-        )
+        await _fail_event(engine, event_id, f"extraction timed out after {extraction_timeout}s")
+        return
     except Exception as exc:
         logger.exception("Background extraction %s failed", event_id)
         await _fail_event(engine, event_id, str(exc))
+        return
+
+    if embedding_provider is not None and transcript_id is not None:
+        try:
+            await _embed_chunks(
+                engine, embedding_provider, transcript_id, request
+            )
+        except Exception:
+            logger.exception(
+                "Chunk embedding failed for %s — extraction already complete",
+                event_id,
+            )
 
 
 async def _run_extraction(
@@ -229,13 +246,59 @@ async def event_status(
     }
 
 
-async def search(
+async def _get_transcript_id_from_event(
+    engine: AsyncEngine, event_id: str
+) -> str | None:
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            select(EventModel.payload).where(EventModel.id == event_id)
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        return row.payload.get("transcript_id") if row.payload else None
+
+
+async def _embed_chunks(
     engine: AsyncEngine,
-    entity_type: str,
-    entity_id: str,
-    query: str,
-    *,
-    limit: int = 5,
-) -> list[dict[str, object]]:
-    """Semantic search across conversation history (optional)."""
-    raise NotImplementedError("search is not yet implemented")
+    provider: EmbeddingProvider,
+    transcript_id: str,
+    request: ProcessRequest,
+) -> None:
+    """Chunk the transcript, embed, and store in transcript_chunks."""
+    chunks = chunk_transcript(request.transcript)
+    if not chunks:
+        return
+
+    texts: list[str] = []
+    rows: list[dict[str, object]] = []
+    for i, chunk_text in enumerate(chunks):
+        entity_type = request.entities[0].entity_type if request.entities else "unknown"
+        entity_id = request.entities[0].entity_id if request.entities else "unknown"
+        texts.append(chunk_text)
+        rows.append({
+            "id": _new_id(),
+            "transcript_id": transcript_id,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "chunk_index": i,
+            "chunk_text": chunk_text,
+        })
+
+    embeddings = await provider.encode_documents(texts)
+
+    async with engine.begin() as conn:
+        for row_data, embedding in zip(rows, embeddings):
+            await conn.execute(
+                insert(TranscriptChunk).values(
+                    id=row_data["id"],
+                    transcript_id=row_data["transcript_id"],
+                    entity_type=row_data["entity_type"],
+                    entity_id=row_data["entity_id"],
+                    chunk_index=row_data["chunk_index"],
+                    chunk_text=row_data["chunk_text"],
+                    embedding=embedding,
+                    created_at=_utcnow(),
+                    updated_at=_utcnow(),
+                )
+            )

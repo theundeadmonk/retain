@@ -1,4 +1,7 @@
-"""POST /v1/memories — store a typed fact."""
+"""Hot-path route — POST /v1/memories.
+
+<5ms fire-and-forget insert. No response body beyond the new memory ID.
+"""
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncEngine
