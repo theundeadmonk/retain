@@ -60,3 +60,33 @@ async def engine():
 @pytest.fixture
 def embedding_provider() -> _MockEmbeddingProvider:
     return _MockEmbeddingProvider(dim=1024)
+
+
+@pytest.fixture
+async def app(engine, embedding_provider):
+    from fastapi import FastAPI
+
+    from retain.routes import router as v1_router
+
+    app = FastAPI(
+        title="Retain-Test",
+        description="Test server",
+        version="0.0.0",
+    )
+    app.state.engine = engine
+    app.state.llm = None
+    app.state.embedding_provider = embedding_provider
+    app.state.sparse_provider = None
+    app.include_router(v1_router, prefix="/v1")
+    return app
+
+
+@pytest.fixture
+async def client(app):
+    from httpx import ASGITransport, AsyncClient
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as ac:
+        yield ac
