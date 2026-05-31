@@ -49,7 +49,7 @@ class FastEmbedProvider(EmbeddingProvider):
             model_name=self._model_name,
             batch_size=self._batch_size,
         )
-        self._dim = self._model._get_model_description(self._model_name)["dim"]
+        self._dim = self._model._get_model_description(self._model_name).dim
 
     async def encode(self, texts: list[str]) -> list[list[float]]:
         self._load()
