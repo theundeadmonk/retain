@@ -4,7 +4,29 @@ The memory layer built for real-time agents — FastAPI server.
 
 PostgreSQL + pgvector 0.8.2. BGE-large dense + SPLADE sparse hybrid retrieval.
 Half-precision embeddings, HNSW on both dense and sparse indexes.
-Designed for voice agents — facts arrive before the LLM finishes generating.
+Profile context in <5ms. Full-text search in <60ms. Extraction runs async post-call.
+
+---
+
+## Quickstart
+
+```bash
+# Start PostgreSQL + server
+docker compose up -d
+
+# Store a typed fact
+curl -s -X POST localhost:8000/v1/memories \
+  -H 'Content-Type: application/json' \
+  -d '{"entity_type":"customer","entity_id":"alice","memory_type":"preference","value":{"room":"412"}}'
+
+# Look up everything the agent needs
+curl -s -X POST localhost:8000/v1/context \
+  -H 'Content-Type: application/json' \
+  -d '{"entity_type":"customer","entity_id":"alice"}' | jq .
+
+# Search past conversations
+curl -s -X POST "localhost:8000/v1/search?query=billing+issue&entity_type=customer&entity_id=alice" | jq .
+```
 
 ---
 
@@ -180,6 +202,19 @@ GET /v1/events/{event_id}
 
 Returns: {event_id, event_type, status, payload, result, created_at, completed_at} | 404
 ```
+
+---
+
+## Database Schema
+
+| Table | Purpose |
+|-------|---------|
+| `entities` | Per-entity profile blob + aggregate counters (memory_count, task_count_open) |
+| `memories` | Typed dimensional facts — append-only. Immutable once written. |
+| `tasks` | Tracked task lifecycle: `open` → `in_progress` → `resolved` / `cancelled` |
+| `transcripts` | Raw conversation transcripts — source of truth for extraction |
+| `transcript_chunks` | Proposition-based chunks with `halfvec(1024)` dense + `sparsevec(30522)` sparse vectors. HNSW indexes on both. |
+| `events` | Async processing status: `pending` → `processing` → `completed` / `failed` |
 
 ---
 

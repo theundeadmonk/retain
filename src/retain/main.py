@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 
     # preload ONNX models at startup — no cold-start on first query
     _ = app.state.embedding_provider.dim
-    _ = app.state.sparse_provider.encode_query_sync("warmup")
+    app.state.sparse_provider._load()
 
     yield
     await engine.dispose()

@@ -67,10 +67,10 @@ async def search(
     if not query.strip():
         return {"chunks": []}
 
-    query_vector = provider.encode_query_sync(query)
+    query_vector = await provider.encode_query(query)
 
     if sparse_provider is not None:
-        query_sparse = sparse_provider.encode_query_sync(query)
+        query_sparse = await sparse_provider.encode_query(query)
         identifier_heavy = _query_is_identifier_heavy(query)
         return await _hybrid_search(
             engine,
